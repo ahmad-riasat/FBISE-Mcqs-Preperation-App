@@ -51,7 +51,7 @@ A responsive, client-side web application built with **semantic HTML5, custom CS
 |   [ Question-by-Question Review + Correct Answer + Explanation ]  |
 |   [ Take Another Test ]                                           |
 +-------------------------------------------------------------------+
-
+```
 ## 3. Web Development Life Cycle (WDLC) Stages
 
 1. **01 — Gathering Relevant Information:** Defined the target audience (FBISE SSC & HSSC students in Classes 9–12), identified the core exam-preparation problem, and analyzed authentic Federal Board Section-A OMR sheet rules (bubble locking and 20/25-minute time limits).
