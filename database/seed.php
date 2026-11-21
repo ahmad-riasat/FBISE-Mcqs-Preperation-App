@@ -1,4 +1,5 @@
 <?php
+//writing data into database
 declare(strict_types=1);
 require __DIR__ . '/../src/db.php';
 

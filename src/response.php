@@ -16,3 +16,12 @@ function require_method(string $method): void
         respond(405, ['ok' => false, 'error' => 'Method not allowed.']);
     }
 }
+function read_json_body(): array
+{
+    $raw  = file_get_contents('php://input');
+    $data = json_decode($raw === false ? '' : $raw, true);
+    if (!is_array($data)) {
+        respond(400, ['ok' => false, 'error' => 'Invalid request body.']);
+    }
+    return $data;
+}

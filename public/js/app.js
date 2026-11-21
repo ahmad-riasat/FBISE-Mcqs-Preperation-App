@@ -1,11 +1,33 @@
 let selectedClass = null;
 let selectedSubject = null;
+let selectedExamId = null;
 let currentQuestions = [];
 let userAnswers = [];
 let timerInterval = null;
 let timeRemaining = 0;
 let candidateName = "";
 let candidateRoll = "";
+
+const userBox = document.getElementById("user-box");
+const userName = document.getElementById("user-name");
+const logoutBtn = document.getElementById("logout-btn");
+const bootStatus = document.getElementById("boot-status");
+const bootRetry = document.getElementById("boot-retry");
+const subjectSection = document.getElementById("subject-section");
+const subjectStatus = document.getElementById("subject-status");
+const subjectRetry = document.getElementById("subject-retry");
+const subjectGrid = document.getElementById("subject-grid");
+const historyStatus = document.getElementById("history-status");
+const historyRetry = document.getElementById("history-retry");
+const historyList = document.getElementById("history-list");
+
+function handleApiError(error) {
+  if (error instanceof ApiError && error.status === 401) {
+    window.location.replace("login.html");
+    return true;
+  }
+  return false;
+}
 
 // Validate Candidate Name & 6-Digit FBISE Roll Number
 function validateCandidateForm() {
@@ -46,60 +68,108 @@ function validateCandidateForm() {
 }
 
 // 1. Select Class & Display FBISE Subjects Below
-function selectClass(className) {
+async function selectClass(className) {
   selectedClass = className;
 
-  const buttons = document.querySelectorAll('.class-btn');
-  buttons.forEach(btn => {
-    btn.classList.remove('selected');
-    if (btn.textContent.includes(className)) {
-      btn.classList.add('selected');
-    }
+  // Save non-sensitive UI preference
+  try {
+    localStorage.setItem("fbise_last_class", className);
+  } catch (e) {
+    // Ignore storage errors in restricted/private browser modes
+  }
+
+  document.querySelectorAll(".class-btn").forEach((btn) => {
+    btn.classList.toggle("selected", btn.textContent.trim() === className);
   });
 
-  const subjectSection = document.getElementById('subject-section');
-  const subjectGrid = document.getElementById('subject-grid');
-  subjectGrid.innerHTML = '';
+  // 1. LOADING STATE
+  subjectSection.style.display = "block";
+  subjectGrid.innerHTML = "";
+  subjectStatus.textContent = "Loading subjects…";
+  subjectRetry.hidden = true;
 
-  if (typeof quizData !== 'undefined' && quizData[className]) {
-    const subjects = Object.keys(quizData[className]);
-    subjects.forEach(subj => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'subject-btn';
-      btn.textContent = subj;
-      btn.onclick = () => startQuiz(subj);
+  try {
+    const query = encodeURIComponent(className);
+    const data = await apiRequest(`exams.php?class=${query}`);
+
+    // Ignore stale response if the user clicked another class while loading
+    if (selectedClass !== className) return;
+
+    // 2. EMPTY STATE
+    if (!data.exams || data.exams.length === 0) {
+      subjectStatus.textContent = `No subjects found for ${className}.`;
+      return;
+    }
+
+    // 3. SUCCESS STATE
+    subjectStatus.textContent = "";
+    data.exams.forEach((exam) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "subject-btn";
+      const mins = Math.round(exam.duration_seconds / 60);
+      btn.textContent = `${exam.subject} (${exam.question_count} MCQs • ${mins} min)`;
+      btn.onclick = () => startQuiz(exam.subject, exam.id);
       subjectGrid.appendChild(btn);
     });
-    subjectSection.style.display = 'block';
+  } catch (error) {
+    if (handleApiError(error)) return;
+    if (selectedClass !== className) return;
+
+    // 4. ERROR STATE
+    subjectStatus.textContent = error.message;
+    subjectRetry.hidden = false;
   }
 }
 
+subjectRetry.addEventListener("click", () => {
+  if (selectedClass) {
+    selectClass(selectedClass);
+  }
+});
+
 // 2. Start Board Exam Immediately & Render OMR Table
-function startQuiz(subjectName) {
+async function startQuiz(subjectName, examId) {
   selectedSubject = subjectName;
-  const examData = quizData[selectedClass][selectedSubject];
+  selectedExamId = examId;
 
-  currentQuestions = examData.questions;
-  timeRemaining = examData.duration;
-  userAnswers = new Array(currentQuestions.length).fill(null);
+  // 1. LOADING STATE in subjectStatus while fetching paper
+  subjectStatus.textContent = `Loading ${subjectName} paper…`;
+  subjectRetry.hidden = true;
 
-  document.getElementById('selection-screen').style.display = 'none';
-  document.getElementById('quiz-screen').style.display = 'block';
-  document.getElementById('quiz-title').textContent = `${selectedClass} - ${selectedSubject}`;
-  window.scrollTo(0, 0);
+  try {
+    const data = await apiRequest(`questions.php?exam_id=${encodeURIComponent(examId)}`);
 
-  renderFBISETable();
-  startTimer();
+    if (!data.questions || data.questions.length === 0) {
+      subjectStatus.textContent = "This exam currently has no questions.";
+      return;
+    }
+
+    subjectStatus.textContent = "";
+    currentQuestions = data.questions;
+    timeRemaining = data.exam.duration_seconds;
+    userAnswers = new Array(currentQuestions.length).fill(null);
+
+    document.getElementById("selection-screen").style.display = "none";
+    document.getElementById("quiz-screen").style.display = "block";
+    document.getElementById("quiz-title").textContent = `${data.exam.class_name} - ${data.exam.subject}`;
+    window.scrollTo(0, 0);
+
+    renderFBISETable();
+    startTimer();
+  } catch (error) {
+    if (handleApiError(error)) return;
+    subjectStatus.textContent = error.message;
+  }
 }
 
 // 3. Render Table Matching FBISE Sheet Layout
 function renderFBISETable() {
-  const omrBody = document.getElementById('omr-body');
-  omrBody.innerHTML = '';
+  const omrBody = document.getElementById("omr-body");
+  omrBody.innerHTML = "";
 
   currentQuestions.forEach((q, qIdx) => {
-    const tr = document.createElement('tr');
+    const tr = document.createElement("tr");
     tr.id = `row-${qIdx}`;
 
     tr.innerHTML = `
@@ -126,12 +196,12 @@ function fillBubble(qIdx, optIdx) {
   userAnswers[qIdx] = optIdx;
 
   const row = document.getElementById(`row-${qIdx}`);
-  const bubbles = row.querySelectorAll('.board-bubble');
+  const bubbles = row.querySelectorAll(".board-bubble");
 
   bubbles.forEach((btn, idx) => {
     btn.disabled = true;
     if (idx === optIdx) {
-      btn.classList.add('filled');
+      btn.classList.add("filled");
     }
   });
 }
@@ -141,12 +211,12 @@ function startTimer() {
   updateTimerDisplay();
   timerInterval = setInterval(() => {
     timeRemaining--;
-    updateTimerDisplay();//setInterval is a builtin func that executes a func after specifc time period.
+    updateTimerDisplay();
 
     if (timeRemaining <= 0) {
       clearInterval(timerInterval);
-      const timeOutMsg = document.getElementById('time-out-msg');
-      if (timeOutMsg) timeOutMsg.style.display = 'block';
+      const timeOutMsg = document.getElementById("time-out-msg");
+      if (timeOutMsg) timeOutMsg.style.display = "block";
       submitQuiz(true);
     }
   }, 1000);
@@ -155,13 +225,12 @@ function startTimer() {
 function updateTimerDisplay() {
   const mins = Math.floor(timeRemaining / 60);
   const secs = timeRemaining % 60;
-  document.getElementById('time-display').textContent =
-    `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  document.getElementById("time-display").textContent =
+    `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 }
 
-// 6. Submit & Display Detailed Review at the End
-function submitQuiz(isAutoSubmit = false) {
-  // Require valid Name & Roll Number only when student submits manually
+// 6. Submit to Server, Grade & Display Detailed Review
+async function submitQuiz(isAutoSubmit = false) {
   if (!isAutoSubmit) {
     if (!validateCandidateForm()) {
       const formEl = document.getElementById("candidate-form");
@@ -177,49 +246,228 @@ function submitQuiz(isAutoSubmit = false) {
     candidateRoll = /^[0-9]{6}$/.test(rollVal) ? rollVal : "Not Provided";
   }
 
-  clearInterval(timerInterval);
-
-  let score = 0;
-  const reviewBox = document.getElementById('answers-review');
-  reviewBox.innerHTML = '';
-
-  currentQuestions.forEach((q, idx) => {
-    const userAns = userAnswers[idx];
-    const isCorrect = userAns === q.answer;
-    if (isCorrect) score++;
-
-    const div = document.createElement('div');
-    div.className = 'review-item';
-    div.innerHTML = `
-      <p><strong>Q${idx + 1}: ${q.question}</strong></p>
-      <p>Your Answer: ${userAns !== null ? q.options[userAns] : '<em>Blank (Unfilled)</em>'} 
-         ${isCorrect ? '✅' : '❌'}</p>
-      <p style="color: #16a34a; font-weight: bold;">Correct Answer: ${q.options[q.answer]}</p>
-      ${q.explanation ? `<p style="font-size: 11px; color: #475569; margin-top: 3px;"><em>Explanation: ${q.explanation}</em></p>` : ''}
-    `;
-    reviewBox.appendChild(div);
-  });
-
-  const timeoutBanner = document.getElementById('result-timeout-banner');
-  if (timeoutBanner) {
-    timeoutBanner.style.display = isAutoSubmit ? 'block' : 'none';
+  const submitBtn = document.getElementById("submit-btn");
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Submitting…";
   }
 
-  const resultInfo = document.getElementById('result-candidate-info');
-  if (resultInfo) {
-    resultInfo.textContent =
-      `Candidate: ${candidateName} | Roll No: ${candidateRoll} | Exam: ${selectedClass} - ${selectedSubject}`;
+  // Build payload matching each question's database ID
+  const answersPayload = currentQuestions.map((q, idx) => ({
+    question_id: q.id,
+    chosen_option: userAnswers[idx]
+  }));
+
+  try {
+    const data = await apiRequest("submit.php", {
+      method: "POST",
+      body: {
+        exam_id: selectedExamId,
+        auto_submitted: isAutoSubmit,
+        answers: answersPayload
+      }
+    });
+
+    clearInterval(timerInterval);
+    timerInterval = null;
+
+    const reviewBox = document.getElementById("answers-review");
+    reviewBox.innerHTML = "";
+
+    data.review.forEach((item, idx) => {
+      const div = document.createElement("div");
+      div.className = "review-item";
+      const userText = item.chosen_option !== null
+        ? item.options[item.chosen_option]
+        : "<em>Blank (Unfilled)</em>";
+
+      div.innerHTML = `
+        <p><strong>Q${idx + 1}: ${item.question}</strong></p>
+        <p>Your Answer: ${userText} ${item.is_correct ? "✅" : "❌"}</p>
+        <p style="color: #16a34a; font-weight: bold;">Correct Answer: ${item.options[item.correct_option]}</p>
+        ${item.explanation ? `<p style="font-size: 11px; color: #475569; margin-top: 3px;"><em>Explanation: ${item.explanation}</em></p>` : ""}
+      `;
+      reviewBox.appendChild(div);
+    });
+
+    const timeoutBanner = document.getElementById("result-timeout-banner");
+    if (timeoutBanner) {
+      timeoutBanner.style.display = isAutoSubmit ? "block" : "none";
+    }
+
+    const resultInfo = document.getElementById("result-candidate-info");
+    if (resultInfo) {
+      resultInfo.textContent =
+        `Candidate: ${candidateName} | Roll No: ${candidateRoll} | Exam: ${selectedClass} - ${selectedSubject}`;
+    }
+
+    document.getElementById("final-score").textContent = data.score;
+    document.getElementById("total-score").textContent = data.total;
+
+    document.getElementById("quiz-screen").style.display = "none";
+    document.getElementById("result-screen").style.display = "block";
+    window.scrollTo(0, 0);
+  } catch (error) {
+    if (handleApiError(error)) return;
+    alert(error.message || "Could not submit your exam. Please try again.");
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Submit Answer Sheet";
+    }
   }
-
-  document.getElementById('final-score').textContent = score;
-  document.getElementById('total-score').textContent = currentQuestions.length;
-
-  document.getElementById('quiz-screen').style.display = 'none';
-  document.getElementById('result-screen').style.display = 'block';
-  window.scrollTo(0, 0);
 }
 
-// 7. Restart App Completely
+// 7. Past Attempts History (Read, Update Note & Delete)
+async function loadAttempts() {
+  if (!historyStatus || !historyList) return;
+
+  historyStatus.textContent = "Loading past attempts…";
+  if (historyRetry) historyRetry.hidden = true;
+
+  try {
+    const data = await apiRequest("attempts.php");
+
+    // Clear right before rendering to prevent duplicate entries
+    historyList.innerHTML = "";
+
+    if (!data.attempts || data.attempts.length === 0) {
+      historyStatus.textContent = "No attempts recorded yet. Complete an exam above to see your history.";
+      return;
+    }
+
+    historyStatus.textContent = "";
+    data.attempts.forEach((att) => {
+      const card = document.createElement("div");
+      card.className = "review-item";
+      card.style.marginBottom = "10px";
+
+      const title = document.createElement("p");
+      const strong = document.createElement("strong");
+      const dateStr = new Date(att.submitted_at * 1000).toLocaleString();
+      strong.textContent = `${att.class_name} - ${att.subject} | Score: ${att.score}/${att.total} (${dateStr})`;
+      title.appendChild(strong);
+
+      const noteEl = document.createElement("p");
+      noteEl.style.fontSize = "13px";
+      noteEl.style.color = "#334155";
+      noteEl.textContent = att.note ? `Note: ${att.note}` : "Note: (None)";
+
+      const actions = document.createElement("div");
+      actions.style.marginTop = "6px";
+      actions.style.display = "flex";
+      actions.style.gap = "8px";
+      actions.style.flexWrap = "wrap";
+
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.textContent = "Edit Note";
+      editBtn.onclick = () => openNoteEditor(card, att, noteEl, actions);
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.textContent = "Delete";
+      delBtn.onclick = () => deleteAttempt(att.id, delBtn);
+
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+      card.appendChild(title);
+      card.appendChild(noteEl);
+      card.appendChild(actions);
+      historyList.appendChild(card);
+    });
+  } catch (error) {
+    if (handleApiError(error)) return;
+    historyStatus.textContent = error.message;
+    if (historyRetry) historyRetry.hidden = false;
+  }
+}
+
+function openNoteEditor(card, att, noteEl, actions) {
+  noteEl.hidden = true;
+  actions.hidden = true;
+
+  const editor = document.createElement("div");
+  editor.style.marginTop = "6px";
+  editor.style.display = "flex";
+  editor.style.gap = "8px";
+  editor.style.flexWrap = "wrap";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 250;
+  input.placeholder = "Add a study note (max 250 chars)…";
+  input.value = att.note || "";
+  input.style.flex = "1";
+  input.style.minWidth = "200px";
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.textContent = "Save";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.textContent = "Cancel";
+
+  cancelBtn.onclick = () => {
+    editor.remove();
+    noteEl.hidden = false;
+    actions.hidden = false;
+  };
+
+  saveBtn.onclick = async () => {
+    saveBtn.disabled = true;
+    cancelBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+
+    try {
+      await apiRequest("attempt-update.php", {
+        method: "POST",
+        body: {
+          attempt_id: att.id,
+          note: input.value
+        }
+      });
+      await loadAttempts();
+    } catch (error) {
+      if (handleApiError(error)) return;
+      alert(error.message || "Could not update note.");
+      saveBtn.disabled = false;
+      cancelBtn.disabled = false;
+      saveBtn.textContent = "Save";
+    }
+  };
+
+  editor.appendChild(input);
+  editor.appendChild(saveBtn);
+  editor.appendChild(cancelBtn);
+  card.appendChild(editor);
+  input.focus();
+}
+
+async function deleteAttempt(attemptId, btn) {
+  btn.disabled = true;
+  btn.textContent = "Deleting…";
+
+  try {
+    await apiRequest("attempt-delete.php", {
+      method: "POST",
+      body: { attempt_id: attemptId }
+    });
+    await loadAttempts();
+  } catch (error) {
+    if (handleApiError(error)) return;
+    alert(error.message || "Could not delete attempt.");
+    btn.disabled = false;
+    btn.textContent = "Delete";
+  }
+}
+
+if (historyRetry) {
+  historyRetry.addEventListener("click", loadAttempts);
+}
+
+// 8. Restart App Completely
 function restartApp() {
   if (timerInterval) {
     clearInterval(timerInterval);
@@ -228,6 +476,7 @@ function restartApp() {
 
   selectedClass = null;
   selectedSubject = null;
+  selectedExamId = null;
   currentQuestions = [];
   userAnswers = [];
   timeRemaining = 0;
@@ -249,44 +498,100 @@ function restartApp() {
     rollInput.classList.remove("input-invalid");
   }
 
-  const resultScreen = document.getElementById('result-screen');
-  const quizScreen = document.getElementById('quiz-screen');
-  const selectionScreen = document.getElementById('selection-screen');
-  const subjectSection = document.getElementById('subject-section');
-  const timeOutMsg = document.getElementById('time-out-msg');
-  const timeoutBanner = document.getElementById('result-timeout-banner');
+  const resultScreen = document.getElementById("result-screen");
+  const quizScreen = document.getElementById("quiz-screen");
+  const selectionScreen = document.getElementById("selection-screen");
+  const timeOutMsg = document.getElementById("time-out-msg");
+  const timeoutBanner = document.getElementById("result-timeout-banner");
 
-  if (resultScreen) resultScreen.style.display = 'none';
-  if (quizScreen) quizScreen.style.display = 'none';
-  if (subjectSection) subjectSection.style.display = 'none';
-  if (timeOutMsg) timeOutMsg.style.display = 'none';
-  if (timeoutBanner) timeoutBanner.style.display = 'none';
-  if (selectionScreen) selectionScreen.style.display = 'block';
+  if (resultScreen) resultScreen.style.display = "none";
+  if (quizScreen) quizScreen.style.display = "none";
+  if (subjectSection) subjectSection.style.display = "none";
+  if (timeOutMsg) timeOutMsg.style.display = "none";
+  if (timeoutBanner) timeoutBanner.style.display = "none";
+  if (selectionScreen) selectionScreen.style.display = "block";
 
-  const omrBody = document.getElementById('omr-body');
-  if (omrBody) omrBody.innerHTML = '';
+  const omrBody = document.getElementById("omr-body");
+  if (omrBody) omrBody.innerHTML = "";
 
-  const reviewBox = document.getElementById('answers-review');
-  if (reviewBox) reviewBox.innerHTML = '';
+  const reviewBox = document.getElementById("answers-review");
+  if (reviewBox) reviewBox.innerHTML = "";
 
-  document.querySelectorAll('.class-btn').forEach(btn => {
-    btn.classList.remove('selected');
+  document.querySelectorAll(".class-btn").forEach((btn) => {
+    btn.classList.remove("selected");
   });
 
+  loadAttempts();
   window.scrollTo(0, 0);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  const candidateForm = document.getElementById('candidate-form');
+document.addEventListener("DOMContentLoaded", () => {
+  const candidateForm = document.getElementById("candidate-form");
   if (candidateForm) {
-    candidateForm.addEventListener('submit', (e) => {
+    candidateForm.addEventListener("submit", (e) => {
       e.preventDefault();
       submitQuiz(false);
     });
   }
 
-  const restartBtn = document.getElementById('restart-btn');
+  const restartBtn = document.getElementById("restart-btn");
   if (restartBtn) {
-    restartBtn.addEventListener('click', restartApp);
+    restartBtn.addEventListener("click", restartApp);
   }
 });
+
+// 9. Session Guard & Auth UI
+function showApp(user) {
+  userName.textContent = user.full_name;
+  userBox.hidden = false;
+  document.getElementById("selection-screen").style.display = "block";
+  loadAttempts();
+
+  // Restore non-sensitive UI preference (last selected class)
+  try {
+    const savedClass = localStorage.getItem("fbise_last_class");
+    const validClasses = ["Class 9", "Class 10", "Class 11", "Class 12"];
+    if (savedClass && validClasses.includes(savedClass)) {
+      selectClass(savedClass);
+    }
+  } catch (e) {
+    // Ignore storage errors
+  }
+}
+
+async function boot() {
+  bootStatus.textContent = "Loading…";
+  bootRetry.hidden = true;
+
+  try {
+    const data = await apiRequest("me.php");
+
+    if (!data.user) {
+      window.location.replace("login.html");
+      return;
+    }
+
+    showApp(data.user);
+    bootStatus.textContent = "";
+  } catch (error) {
+    bootStatus.textContent = error.message;
+    bootRetry.hidden = false;
+  }
+}
+
+logoutBtn.addEventListener("click", async () => {
+  logoutBtn.disabled = true;
+  logoutBtn.textContent = "Logging out…";
+
+  try {
+    await apiRequest("logout.php", { method: "POST" });
+    window.location.replace("login.html");
+  } catch (error) {
+    bootStatus.textContent = error.message;
+    logoutBtn.disabled = false;
+    logoutBtn.textContent = "Log out";
+  }
+});
+
+bootRetry.addEventListener("click", boot);
+boot();

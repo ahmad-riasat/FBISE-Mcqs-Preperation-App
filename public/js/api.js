@@ -1,16 +1,42 @@
-function getClasses() { /* return classes */ }
+let csrfToken = "";
 
-function getSubjectsByClass(classLevel) {
-  // TODO: return subjects filtered by classLevel (use filter)
+class ApiError extends Error {
+  constructor(message, status, fields) {
+    super(message);
+    this.status = status;
+    this.fields = fields || {};
+  }
 }
 
-function getSubjectById(id) { /* TODO */ }
+async function apiRequest(path, options = {}) {
+  const method = options.method || "GET";
+  const config = { method: method, headers: {}, credentials: "same-origin" };
 
-function getQuestionsBySubject(subjectId) {
-  // TODO: return filtered questions; return [] if none
-}
+  if (method !== "GET") {
+    config.headers["Content-Type"] = "application/json";
+    config.headers["X-CSRF-Token"] = csrfToken;
+    config.body = JSON.stringify(options.body || {});
+  }
 
-function calculateScore(questions, answers) {
-  // TODO: loop, compare answers[i] with questions[i].answer
-  // return { correct, wrong, skipped, total, percentage }
+  let response;
+  try {
+    response = await fetch("api/" + path, config);
+  } catch (networkError) {
+    throw new ApiError("Cannot reach the server. Check your connection and try again.", 0);
+  }
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (parseError) {
+    throw new ApiError("The server sent an unexpected reply.", response.status);
+  }
+
+  if (data.csrf_token) {
+    csrfToken = data.csrf_token;           // always keep the newest token
+  }
+  if (!response.ok || !data.ok) {
+    throw new ApiError(data.error || "Request failed.", response.status, data.fields);
+  }
+  return data;
 }

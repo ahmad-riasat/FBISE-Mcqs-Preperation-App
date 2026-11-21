@@ -21,8 +21,12 @@ body {
   background: #003366;
   border-bottom: 2px solid #e2e8f0;
   padding: 12px 24px;
-  
-  
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .logo-area {
@@ -54,6 +58,33 @@ body {
   color: #ffffff;
   font-style: italic;
 }
+[hidden] {
+  display: none !important;
+}
+
+.user-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #fff;
+  font-size: 14px;
+}
+
+.btn-logout {
+  background: transparent;
+  color: #fff;
+  border: 1px solid #fff;
+  padding: 6px 14px;
+}
+
+.btn-logout:hover,
+.btn-logout:focus-visible {
+  background: #fff;
+  color: #003366;
+}
+
+
+
 
 /*
    CONTAINER & HEADINGS (FLEXBOX)
@@ -197,6 +228,22 @@ body {
   color: #dc2626;
   border-left-color: #dc2626;
   background: #fef2f2;
+}
+.error-msg {
+  color: #dc2626;
+  font-size: 10.5px;
+  min-height: 13px;
+}
+
+#login-status:not(:empty) {
+  color: #dc2626;
+  background-color: #fef2f2;
+  border-left: 3px solid #dc2626;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 12px;
+  margin-top: 8px;
 }
 
 /* 
@@ -516,3 +563,9 @@ body {
     font-size: 26px;
   }
 }
+@media (max-width: 600px) {
+  .user-box {
+    width: 100%;
+    justify-content: space-between;
+    font-size: 12px;
+  }}
